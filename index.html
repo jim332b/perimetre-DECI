@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     
-    <title>Calculateur de Périmètres avec Import PDF</title>
+    <title>Calculateur de Périmètres GPS (IGN)</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
@@ -43,15 +45,17 @@
             font-weight: bold; cursor: pointer; text-transform: uppercase; font-size: 11px; margin-top: 5px;
         }
         .btn-blue { background: #0284c7; color: white; }
+        .btn-green { background: #16a34a; color: white; }
         .btn-red { background: #c62828; color: white; }
         
-        /* Contre-mesures de calibrage (Flèches) */
+        /* Grille des flèches de calibrage */
         .calib-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 10px; }
         .btn-calib { background: #444; color: white; border: 1px solid #555; padding: 6px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; }
         .btn-calib:active { background: #666; }
         
         #file-input { display: none; }
         #calib-controls { display: none; margin-top: 10px; border-top: 1px solid #444; padding-top: 10px; }
+        #status-gps { color: #22c55e; font-weight: bold; text-align: center; margin-bottom: 5px; }
     </style>
 </head>
 <body>
@@ -59,7 +63,11 @@
     <div id="map"></div>
 
     <div id="panel-import">
-        <h3 style="margin:0 0 8px 0; color:#a855f7; font-size:14px; text-transform:uppercase;">Superposition de Plan</h3>
+        <h3 style="margin:0 0 8px 0; color:#a855f7; font-size:14px; text-transform:uppercase;">Position & Superposition</h3>
+        
+        <div id="status-gps">Recherche Signal GPS...</div>
+        <button class="btn-action btn-green" style="margin-bottom: 10px;" onclick="declencherGpsPerimetre()">📍 Recentrer sur ma position</button>
+        
         <button class="btn-action btn-blue" onclick="document.getElementById('file-input').click()">📁 Importer un plan (PDF / Image)</button>
         <input type="file" id="file-input" accept="application/pdf, image/png, image/jpeg">
         
@@ -82,24 +90,21 @@
 
     <div id="panel-info">
         <h3>Périmètres Ops</h3>
-        <p style="margin: 0 0 10px 0; color: #aaa;">Cliquez sur la carte ou le plan importé pour générer les rayons.</p>
+        <p style="margin: 0 0 10px 0; color: #aaa;">Les cercles sont automatiquement calculés autour de votre position réelle.</p>
         
         <div class="legende-item"><div class="couleur-box" style="background: #ff5252;"></div> <span>Zone 200 m</span></div>
         <div class="legende-item"><div class="couleur-box" style="background: #ffab40;"></div> <span>Zone 400 m</span></div>
         <div class="legende-item"><div class="couleur-box" style="background: #ffd740;"></div> <span>Zone 1 000 m</span></div>
         <div class="legende-item"><div class="couleur-box" style="background: #29b6f6;"></div> <span>Zone 2 000 m</span></div>
         <div class="legende-item"><div class="couleur-box" style="background: #66bb6a;"></div> <span>Zone 4 000 m</span></div>
-        
-        <button class="btn-action btn-red" style="margin-top:12px;" onclick="effacerZones()">Effacer les cercles</button>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
-        // Spécifier le chemin des scripts internes pour PDF.js
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
-        // Initialisation de la carte (Centre de la France)
+        // Initialisation de la carte sur la France en attendant le signal GPS
         const map = L.map('map', { zoomControl: false }).setView([46.2, 2.2], 6);
         L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
@@ -114,53 +119,108 @@
 
         L.control.layers({ "Carte 1/25 000": scan25IGN, "Satellite": satelliteIGN }, null, { position: 'topright', collapsed: false }).addTo(map);
 
-        // Variables globales pour le plan importé
+        // Groupes de calques Leaflet
+        const zoneGroup = L.featureGroup().addTo(map);
         let planOverlay = null;
         let planBounds = null;
         let planOpacite = 0.6;
+        let positionActuelleGps = null;
+
+        const configurationsRayons = [
+            { rayon: 200, couleur: '#ff5252' },
+            { rayon: 400, couleur: '#ffab40' },
+            { rayon: 1000, couleur: '#ffd740' },
+            { rayon: 2000, couleur: '#29b6f6' },
+            { rayon: 4000, couleur: '#66bb6a' }
+        ];
+
+        // ================= FONCTION DU GEOPOSITIONNEMENT AUTOMATIQUE =================
+        function declencherGpsPerimetre() {
+            document.getElementById('status-gps').style.color = '#ffab40';
+            document.getElementById('status-gps').innerText = "Acquisition du signal...";
+            
+            map.locate({ setView: true, maxZoom: 16, enableHighAccuracy: true });
+        }
+
+        // Dès que la position GPS est trouvée
+        map.on('locationfound', function(e) {
+            positionActuelleGps = e.latlng;
+            document.getElementById('status-gps').style.color = '#22c55e';
+            document.getElementById('status-gps').innerText = "GPS Connecté (±" + Math.round(e.accuracy) + "m)";
+            
+            // On nettoie la carte
+            zoneGroup.clearLayers();
+
+            // Ajout du marqueur à notre position exacte
+            L.circleMarker(positionActuelleGps, {
+                radius: 9, color: 'white', fillColor: '#0284c7', fillOpacity: 1, weight: 3
+            }).addTo(zoneGroup).bindPopup("<b>Votre position actuelle</b>").openPopup();
+
+            // Tracé automatique des 5 cercles concentriques
+            configurationsRayons.forEach(config => {
+                L.circle(positionActuelleGps, {
+                    radius: config.rayon,
+                    color: config.couleur,
+                    weight: 2.5,
+                    fillColor: config.couleur,
+                    fillOpacity: 0.05,
+                    dashArray: '5, 5'
+                }).addTo(zoneGroup);
+            });
+
+            // Ajustement automatique de la carte pour afficher tous les cercles (jusqu'à 4km)
+            map.fitBounds(zoneGroup.getBounds(), { padding: [15, 15] });
+        });
+
+        // En cas d'erreur de signal GPS
+        map.on('locationerror', function() {
+            document.getElementById('status-gps').style.color = '#ef4444';
+            document.getElementById('status-gps').innerText = "Erreur GPS : Autorisation refusée";
+            alert("Impossible d'accéder au GPS de votre appareil. Vérifiez les autorisations de votre navigateur.");
+        });
+
+        // Lancement automatique du GPS dès l'ouverture du site
+        window.addEventListener('load', () => {
+            setTimeout(declencherGpsPerimetre, 1000);
+        });
 
         // ================= GESTION DES FICHIERS (PDF & IMAGES) =================
         document.getElementById('file-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
 
-            supprimerPlan(); // On nettoie l'ancien si existant
+            supprimerPlan();
 
-            const centreCarte = map.getCenter();
-            // Création d'une emprise de départ par défaut (environ 1km de large autour de la vue actuelle)
+            // On prend le centre de la carte actuelle pour poser le plan à calibrer
+            const pointAncre = positionActuelleGps || map.getCenter();
             const delta = 0.005; 
             planBounds = L.latLngBounds(
-                [centreCarte.lat - delta, centreCarte.lng - delta],
-                [centreCarte.lat + delta, centreCarte.lng + delta]
+                [pointAncre.lat - delta, pointAncre.lng - delta],
+                [pointAncre.lat + delta, pointAncre.lng + delta]
             );
 
             if (file.type === "application/pdf") {
-                // Traitement spécifique pour extraire la page 1 du PDF
                 const fileReader = new FileReader();
                 fileReader.onload = function() {
                     const typedarray = new Uint8Array(this.result);
                     pdfjsLib.getDocument(typedarray).promise.then(function(pdf) {
                         pdf.getPage(1).then(function(page) {
-                            const viewport = page.getViewport({ scale: 2.0 }); // Haute résolution
+                            const viewport = page.getViewport({ scale: 2.0 });
                             const canvas = document.createElement('canvas');
                             const context = canvas.getContext('2d');
                             canvas.height = viewport.height;
                             canvas.width = viewport.width;
 
                             page.render({ canvasContext: context, viewport: viewport }).promise.then(function() {
-                                const imgUrl = canvas.toDataURL('image/png');
-                                afficherPlanSurCarte(imgUrl);
+                                afficherPlanSurCarte(canvas.toDataURL('image/png'));
                             });
                         });
                     });
                 };
                 fileReader.readAsArrayBuffer(file);
             } else {
-                // Traitement direct s'il s'agit d'une simple image (PNG/JPG)
                 const reader = new FileReader();
-                reader.onload = function(event) {
-                    afficherPlanSurCarte(event.target.result);
-                };
+                reader.onload = function(event) { afficherPlanSurCarte(event.target.result); };
                 reader.readAsDataURL(file);
             }
         });
@@ -168,10 +228,8 @@
         function afficherPlanSurCarte(sourceImage) {
             planOverlay = L.imageOverlay(sourceImage, planBounds, {
                 opacity: planOpacite,
-                interactive: false // Laisse passer le clic pour pouvoir dessiner les cercles dessus
+                interactive: false
             }).addTo(map);
-
-            map.setView(planBounds.getCenter(), 15);
             document.getElementById('calib-controls').style.display = 'block';
         }
 
@@ -184,7 +242,6 @@
             let lngDiff = planBounds.getEast() - planBounds.getWest();
 
             if (action === 'scale') {
-                // Agrandir ou rétrécir l'image
                 latDiff = latDiff * valeur;
                 lngDiff = lngDiff * valeur;
                 planBounds = L.latLngBounds(
@@ -192,8 +249,7 @@
                     [center.lat + latDiff/2, center.lng + lngDiff/2]
                 );
             } else if (action === 'move') {
-                // Déplacer le plan sur les axes cardinaux (vitesse dépend du zoom actuel)
-                const step = (map.getBounds().getNorth() - map.getBounds().getSouth()) * 0.03;
+                const step = (map.getBounds().getNorth() - map.getBounds().getSouth()) * 0.02;
                 let moveLat = 0, moveLng = 0;
                 if (valeur === 'up') moveLat = step;
                 if (valeur === 'down') moveLat = -step;
@@ -205,12 +261,10 @@
                     [planBounds.getNorth() + moveLat, planBounds.getEast() + moveLng]
                 );
             } else if (action === 'opacity') {
-                // Gérer le niveau de transparence pour voir la carte en dessous
                 planOpacite = Math.min(Math.max(planOpacite + valeur, 0.1), 1);
                 planOverlay.setOpacity(planOpacite);
                 return;
             }
-
             planOverlay.setBounds(planBounds);
         }
 
@@ -219,39 +273,6 @@
             document.getElementById('calib-controls').style.display = 'none';
             document.getElementById('file-input').value = "";
         }
-
-        // ================= LOGIQUE DES CERCLES CONCENTRIQUES =================
-        const zoneGroup = L.featureGroup().addTo(map);
-        const configurationsRayons = [
-            { rayon: 200, couleur: '#ff5252' },
-            { rayon: 400, couleur: '#ffab40' },
-            { rayon: 1000, couleur: '#ffd740' },
-            { rayon: 2000, couleur: '#29b6f6' },
-            { rayon: 4000, couleur: '#66bb6a' }
-        ];
-
-        map.on('click', function(e) {
-            zoneGroup.clearLayers();
-
-            L.marker(e.latlng).addTo(zoneGroup)
-                .bindPopup("<b>Centre d'impact</b>")
-                .openPopup();
-
-            configurationsRayons.forEach(config => {
-                L.circle(e.latlng, {
-                    radius: config.rayon,
-                    color: config.couleur,
-                    weight: 2,
-                    fillColor: config.couleur,
-                    fillOpacity: 0.06,
-                    dashArray: '5, 5'
-                }).addTo(zoneGroup);
-            });
-
-            map.fitBounds(zoneGroup.getBounds(), { padding: [15, 15] });
-        });
-
-        function effacerZones() { zoneGroup.clearLayers(); }
     </script>
 </body>
 </html>
