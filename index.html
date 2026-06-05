@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tableau Tactique & Mesure - Gironde</title>
+    <title>Tableau Tactique Évolué - Gironde</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
@@ -15,7 +15,7 @@
         #panel-controls {
             position: absolute; top: 15px; left: 15px; z-index: 1000;
             background: rgba(30, 30, 30, 0.95); color: white; padding: 15px; 
-            border-radius: 8px; border: 1px solid #444; width: 280px;
+            border-radius: 8px; border: 1px solid #444; width: 290px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.6); font-size: 13px;
         }
         #panel-controls h3 { margin: 0 0 10px 0; color: #a855f7; text-transform: uppercase; font-size: 14px; text-align: center;}
@@ -28,13 +28,16 @@
         
         /* Zone d'étalonnage */
         .zone-etalonnage { background: #222; padding: 10px; border-radius: 4px; border: 1px dashed #555; margin-top: 10px; }
-        .input-pixel { width: 70px; background: #333; border: 1px solid #555; color: white; padding: 5px; border-radius: 3px; font-weight: bold; text-align: center; }
+        .select-ui, .input-pixel { background: #333; border: 1px solid #555; color: white; padding: 5px; border-radius: 3px; font-weight: bold; font-size: 12px; }
+        .select-ui { width: 100%; margin-bottom: 8px; }
+        .input-pixel { width: 70px; text-align: center; }
         
         .box-legende { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 15px; text-align: center; font-size: 9px; font-weight: bold; }
         .item-legende { padding: 4px 2px; border-radius: 3px; color: black; }
         
         #instructions { background: #1a1a1a; padding: 8px; border-radius: 4px; border-left: 3px solid #8b5cf6; margin-bottom: 10px; font-size: 11px; color: #ccc; }
-        #resultat-mesure { font-weight: bold; color: #38bdf8; margin-top: 5px; min-height: 16px; }
+        #resultat-mesure { font-weight: bold; color: #38bdf8; margin-top: 5px; min-height: 16px; text-align: center; }
+        .ligne-reglage { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -45,24 +48,32 @@
         <h3>PC Opérationnel Gironde</h3>
         
         <div id="instructions">
-            <b>Mode Standard :</b> Double-cliquez pour poser les périmètres de sécurité.<br><br>
-            <b>Mode Mesure :</b> Activez la règle ci-dessous pour calculer l'échelle d'une dalle.
+            <b>Périmètres :</b> Double-cliquez pour les valider.<br>
+            <b>Étalonnage :</b> Choisissez la distance cible, activez la règle et cliquez sur vos 2 repères de carte.
         </div>
 
         <button class="btn-ui btn-purple" onclick="document.getElementById('file-input').click()">📁 Ouvrir une dalle PDF</button>
         <input type="file" id="file-input" accept="application/pdf">
         
         <div class="zone-etalonnage">
-            <button id="btn-regle" class="btn-ui btn-blue" onclick="basculerModeRegle()">📏 Activer la règle de mesure</button>
+            <label style="font-size:11px; color:#aaa; display:block; margin-bottom:4px;">1. Distance à mesurer sur le PDF :</label>
+            <select id="select-distance" class="select-ui">
+                <option value="400">400 mètres (Zone / Repère court)</option>
+                <option value="1000">1 000 mètres (1 km)</option>
+                <option value="2000" selected>2 000 mètres (Carré DFCI standard)</option>
+                <option value="4000">4 000 mètres (4 km)</option>
+            </select>
+
+            <button id="btn-regle" class="btn-ui btn-blue" onclick="basculerModeRegle()">📏 Activer la règle</button>
             <div id="resultat-mesure"></div>
             
-            <div style="margin-top:10px; display:flex; justify-content:space-between; align-items:center;">
-                <span>Échelle actuelle :</span>
+            <div class="ligne-reglage">
+                <span>Rapport d'échelle :</span>
                 <div>
-                    <input type="number" id="input-scale" class="input-pixel" value="300" onchange="mettreAJourEchelle(this.value)"> px
+                    <input type="number" id="input-scale" class="input-pixel" value="300" onchange="mettreAJourEchelleDirecte(this.value)"> px
                 </div>
             </div>
-            <span style="font-size:10px; color:#aaa;">(Valeur en pixels pour un carré de 2km)</span>
+            <span style="font-size:10px; color:#aaa; display:block; text-align:right; margin-top:2px;">(Valeur étalon pour 2 km)</span>
         </div>
         
         <button class="btn-ui btn-red" style="margin-top:10px;" onclick="effacerTout()">❌ Effacer l'écran</button>
@@ -81,11 +92,10 @@
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
-        // Valeur par défaut de l'échelle (pixels pour 2000m)
-        let PIXELS_POUR_2000M = 455; 
+        // Base de calcul toujours ramenée à l'étalon de 2000m pour Leaflet
+        let PIXELS_POUR_2000M = 300; 
         let modeRegleActive = false;
         let pointsMesure = [];
-        let ligneMesure = null;
 
         const map = L.map('map', {
             crs: L.CRS.Simple,
@@ -105,11 +115,10 @@
             return (metres * PIXELS_POUR_2000M) / 2000;
         }
 
-        function mettreAJourEchelle(nouvelleValeur) {
+        function mettreAJourEchelleDirecte(nouvelleValeur) {
             PIXELS_POUR_2000M = parseFloat(nouvelleValeur);
         }
 
-        // ================= GESTION DU MODE RÈGLE =================
         function basculerModeRegle() {
             modeRegleActive = !modeRegleActive;
             const btn = document.getElementById('btn-regle');
@@ -117,47 +126,52 @@
             
             if (modeRegleActive) {
                 btn.style.background = '#eab308';
-                btn.innerText = "🛑 Règle active (Cliquez 2 points)";
-                divResultat.innerText = "Sélectionnez le début et la fin d'un carré...";
+                btn.innerText = "🛑 Règle active (cliquez 2 points)";
+                divResultat.innerText = "Mesurez la distance sélectionnée...";
                 pointsMesure = [];
-                if (ligneMesure) { regleGroup.clearLayers(); }
+                regleGroup.clearLayers();
             } else {
                 btn.style.background = '#0284c7';
-                btn.innerText = "📏 Activer la règle de mesure";
+                btn.innerText = "📏 Activer la règle";
                 divResultat.innerText = "";
                 regleGroup.clearLayers();
             }
         }
 
-        // ================= CLIC SUR LA CARTE (DESSIN OU MESURE) =================
+        // ================= LOGIQUE DE CLIC ET DU CALCUL D'ÉCHELLE CRITIQUÉ =================
         map.on('click', function(e) {
             if (!modeRegleActive) return;
 
             pointsMesure.push(e.latlng);
-
-            // Dessiner un repère visuel sur le point cliqué
             L.circleMarker(e.latlng, { radius: 4, color: '#eab308', fillColor: '#fff', fillOpacity: 1 }).addTo(regleGroup);
 
             if (pointsMesure.length === 2) {
-                // Calcul de la distance pure en pixels (théorème de Pythagore sur coordonnées planes)
+                // 1. Distance brute lue en pixels
                 const dx = pointsMesure[1].lng - pointsMesure[0].lng;
                 const dy = pointsMesure[1].lat - pointsMesure[0].lat;
-                const distancePixels = Math.round(Math.sqrt(dx * dx + dy * dy));
+                const distancePixels = Math.sqrt(dx * dx + dy * dy);
 
-                // Tracer la ligne de mesure entre les deux points
+                // 2. Récupération de la distance cible choisie par l'opérateur (ex: 400 ou 2000)
+                const distanceCibleMetres = parseFloat(document.getElementById('select-distance').value);
+
+                // 3. Règle de trois pour convertir la mesure en valeur étalon de 2000m
+                // Formule : (Pixels_lus / Distance_lue_en_m) * 2000
+                const etalonCalcule = Math.round((distancePixels / distanceCibleMetres) * 2000);
+
+                // Dessin de la ligne témoin
                 L.polyline(pointsMesure, { color: '#eab308', weight: 3, dashArray: '4, 4' }).addTo(regleGroup);
 
-                // Afficher le résultat
-                document.getElementById('resultat-mesure').innerText = `Mesure : ${distancePixels} pixels`;
+                // Affichage des informations calculées
+                document.getElementById('resultat-mesure').innerText = `Lu : ${Math.round(distancePixels)}px pour ${distanceCibleMetres}m`;
                 
-                // Proposer automatiquement la valeur dans la case d'étalonnage
-                document.getElementById('input-scale').value = distancePixels;
-                PIXELS_POUR_2000M = distancePixels;
+                // Injection automatique dans la case de contrôle et mise à jour du moteur
+                document.getElementById('input-scale').value = etalonCalcule;
+                PIXELS_POUR_2000M = etalonCalcule;
 
-                // Désactiver proprement la règle après la mesure
+                // Fermeture de la règle
                 modeRegleActive = false;
                 document.getElementById('btn-regle').style.background = '#0284c7';
-                document.getElementById('btn-regle').innerText = "📏 Activer la règle de mesure";
+                document.getElementById('btn-regle').innerText = "📏 Activer la règle";
             }
         });
 
@@ -190,7 +204,7 @@
             L.circleMarker(pointCentral, { radius: 5, color: '#fff', fillColor: '#000', fillOpacity: 1, weight: 2 }).addTo(layerGroup);
         });
 
-        // ================= CHARGEMENT DU PDF =================
+        // ================= RECEPTION PDF =================
         document.getElementById('file-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -232,7 +246,7 @@
             pointsMesure = [];
             modeRegleActive = false;
             document.getElementById('btn-regle').style.background = '#0284c7';
-            document.getElementById('btn-regle').innerText = "📏 Activer la règle de mesure";
+            document.getElementById('btn-regle').innerText = "📏 Activer la règle";
         }
     </script>
 </body>
