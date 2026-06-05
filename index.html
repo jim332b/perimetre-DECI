@@ -2,8 +2,10 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tableau Tactique Évolué - Gironde</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Plein Écran Tactique - Gironde</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
@@ -12,79 +14,83 @@
         body, html { margin: 0; padding: 0; height: 100%; background-color: #121212; font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif; overflow: hidden; }
         #map { height: 100vh; width: 100%; background: #121212; }
         
-        #panel-controls {
-            position: absolute; top: 15px; left: 15px; z-index: 1000;
-            background: rgba(30, 30, 30, 0.95); color: white; padding: 15px; 
-            border-radius: 8px; border: 1px solid #444; width: 290px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.6); font-size: 13px;
+        /* BANDEAU SUPÉRIEUR DES OUTILS (MASQUABLE) */
+        #top-interface {
+            position: absolute; top: 10px; left: 10px; right: 10px; z-index: 1000;
+            background: rgba(25, 25, 25, 0.96); color: white; padding: 10px; 
+            border-radius: 8px; border: 1px solid #333;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); font-size: 13px;
+            transition: all 0.3s ease;
         }
-        #panel-controls h3 { margin: 0 0 10px 0; color: #a855f7; text-transform: uppercase; font-size: 14px; text-align: center;}
+        .outils-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+        .flex-group { display: flex; gap: 6px; align-items: center; }
         
-        .btn-ui { width: 100%; padding: 10px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; font-size: 11px; margin-top: 5px; }
+        /* BOUTONS UI */
+        .btn-action { padding: 8px 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; font-size: 11px; }
         .btn-purple { background: #8b5cf6; color: white; }
         .btn-blue { background: #0284c7; color: white; }
-        .btn-red { background: #c62828; color: white; }
+        .btn-red { background: #b91c1c; color: white; }
+        .btn-toggle { background: #374151; color: white; border: 1px solid #4b5563; }
+        
+        .select-ui, .input-pixel { background: #333; border: 1px solid #555; color: white; padding: 6px; border-radius: 3px; font-weight: bold; font-size: 11px; }
+        .input-pixel { width: 55px; text-align: center; }
+        
+        /* LÉGENDE FLOTTANTE FIXE (TOUJOURS VISIBLE) */
+        #legende-ops {
+            position: absolute; bottom: 15px; right: 15px; z-index: 1010;
+            background: rgba(20, 20, 20, 0.9); padding: 8px 12px; border-radius: 6px;
+            border: 1px solid #444; box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            display: flex; flex-direction: column; gap: 4px; width: 85px; font-size: 10px; font-weight: bold;
+        }
+        .legende-item { display: flex; align-items: center; justify-content: space-between; padding: 2px 5px; border-radius: 3px; color: black; }
+
+        #resultat-mesure { font-weight: bold; color: #38bdf8; font-size: 11px; text-align: center; }
         #file-input { display: none; }
-        
-        /* Zone d'étalonnage */
-        .zone-etalonnage { background: #222; padding: 10px; border-radius: 4px; border: 1px dashed #555; margin-top: 10px; }
-        .select-ui, .input-pixel { background: #333; border: 1px solid #555; color: white; padding: 5px; border-radius: 3px; font-weight: bold; font-size: 12px; }
-        .select-ui { width: 100%; margin-bottom: 8px; }
-        .input-pixel { width: 70px; text-align: center; }
-        
-        .box-legende { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 15px; text-align: center; font-size: 9px; font-weight: bold; }
-        .item-legende { padding: 4px 2px; border-radius: 3px; color: black; }
-        
-        #instructions { background: #1a1a1a; padding: 8px; border-radius: 4px; border-left: 3px solid #8b5cf6; margin-bottom: 10px; font-size: 11px; color: #ccc; }
-        #resultat-mesure { font-weight: bold; color: #38bdf8; margin-top: 5px; min-height: 16px; text-align: center; }
-        .ligne-reglage { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
     </style>
 </head>
 <body>
 
     <div id="map"></div>
 
-    <div id="panel-controls">
-        <h3>PC Opérationnel Gironde</h3>
-        
-        <div id="instructions">
-            <b>Périmètres :</b> Double-cliquez pour les valider.<br>
-            <b>Étalonnage :</b> Choisissez la distance cible, activez la règle et cliquez sur vos 2 repères de carte.
-        </div>
+    <div style="position: absolute; top: 12px; right: 15px; z-index: 1005;">
+        <button class="btn-action btn-toggle" onclick="basculerInterface()" id="btn-masquer">👁️ Masquer les outils</button>
+    </div>
 
-        <button class="btn-ui btn-purple" onclick="document.getElementById('file-input').click()">📁 Ouvrir une dalle PDF</button>
-        <input type="file" id="file-input" accept="application/pdf">
-        
-        <div class="zone-etalonnage">
-            <label style="font-size:11px; color:#aaa; display:block; margin-bottom:4px;">1. Distance à mesurer sur le PDF :</label>
-            <select id="select-distance" class="select-ui">
-                <option value="400">400 mètres (Zone / Repère court)</option>
-                <option value="1000">1 000 mètres (1 km)</option>
-                <option value="2000" selected>2 000 mètres (Carré DFCI standard)</option>
-                <option value="4000">4 000 mètres (4 km)</option>
-            </select>
-
-            <button id="btn-regle" class="btn-ui btn-blue" onclick="basculerModeRegle()">📏 Activer la règle</button>
-            <div id="resultat-mesure"></div>
-            
-            <div class="ligne-reglage">
-                <span>Rapport d'échelle :</span>
-                <div>
-                    <input type="number" id="input-scale" class="input-pixel" value="300" onchange="mettreAJourEchelleDirecte(this.value)"> px
-                </div>
+    <div id="top-interface">
+        <div class="outils-row" style="margin-bottom: 6px;">
+            <div class="flex-group">
+                <button class="btn-action btn-purple" onclick="document.getElementById('file-input').click()">📁 Dalle PDF</button>
+                <input type="file" id="file-input" accept="application/pdf">
+                <button class="btn-action btn-red" onclick="effacerTout()">❌ Effacer</button>
             </div>
-            <span style="font-size:10px; color:#aaa; display:block; text-align:right; margin-top:2px;">(Valeur étalon pour 2 km)</span>
+            <div id="resultat-mesure">Double-cliquez sur le PDF pour les périmètres</div>
         </div>
         
-        <button class="btn-ui btn-red" style="margin-top:10px;" onclick="effacerTout()">❌ Effacer l'écran</button>
-
-        <div class="box-legende">
-            <div class="item-legende" style="background: #ff5252;">200m</div>
-            <div class="item-legende" style="background: #ffab40;">400m</div>
-            <div class="item-legende" style="background: #ffd740;">1km</div>
-            <div class="item-legende" style="background: #29b6f6; color:white;">2km</div>
-            <div class="item-legende" style="background: #66bb6a;">4km</div>
+        <div class="outils-row" style="border-top: 1px solid #333; padding-top: 6px;">
+            <div class="flex-group">
+                <span style="font-size:11px; color:#aaa;">Règle :</span>
+                <select id="select-distance" class="select-ui">
+                    <option value="400">400 m</option>
+                    <option value="1000">1 km</option>
+                    <option value="2000" selected>2 km (Carré DFCI)</option>
+                    <option value="4000">4 km</option>
+                </select>
+                <button id="btn-regle" class="btn-action btn-blue" onclick="basculerModeRegle()">📏 Activer</button>
+            </div>
+            
+            <div class="flex-group">
+                <span style="font-size:11px; color:#aaa;">Échelle :</span>
+                <input type="number" id="input-scale" class="input-pixel" value="300" onchange="mettreAJourEchelleDirecte(this.value)"> <span style="font-size:11px; color:#aaa;">px pour 2km</span>
+            </div>
         </div>
+    </div>
+
+    <div id="legende-ops">
+        <div class="legende-item" style="background: #ff5252;"><span>200 m</span></div>
+        <div class="legende-item" style="background: #ffab40;"><span>400 m</span></div>
+        <div class="legende-item" style="background: #ffd740;"><span>1 km</span></div>
+        <div class="legende-item" style="background: #29b6f6; color: white;"><span>2 km</span></div>
+        <div class="legende-item" style="background: #66bb6a;"><span>4 km</span></div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -92,9 +98,9 @@
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
-        // Base de calcul toujours ramenée à l'étalon de 2000m pour Leaflet
         let PIXELS_POUR_2000M = 300; 
         let modeRegleActive = false;
+        let interfaceMasquee = false;
         let pointsMesure = [];
 
         const map = L.map('map', {
@@ -105,7 +111,7 @@
             doubleClickZoom: false
         }).setView([0, 0], 0);
 
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
         const layerGroup = L.featureGroup().addTo(map);
         const regleGroup = L.featureGroup().addTo(map);
@@ -119,6 +125,25 @@
             PIXELS_POUR_2000M = parseFloat(nouvelleValeur);
         }
 
+        // MASQUER / AFFICHER LES CONFIGURATIONS 
+        function basculerInterface() {
+            interfaceMasquee = !interfaceMasquee;
+            const bandeau = document.getElementById('top-interface');
+            const btn = document.getElementById('btn-masquer');
+            
+            if (interfaceMasquee) {
+                bandeau.style.opacity = '0';
+                bandeau.style.pointerEvents = 'none';
+                btn.innerText = "👁️ Afficher les outils";
+                btn.style.background = "#8b5cf6";
+            } else {
+                bandeau.style.opacity = '1';
+                bandeau.style.pointerEvents = 'auto';
+                btn.innerText = "👁️ Masquer les outils";
+                btn.style.background = "#374151";
+            }
+        }
+
         function basculerModeRegle() {
             modeRegleActive = !modeRegleActive;
             const btn = document.getElementById('btn-regle');
@@ -126,19 +151,19 @@
             
             if (modeRegleActive) {
                 btn.style.background = '#eab308';
-                btn.innerText = "🛑 Règle active (cliquez 2 points)";
-                divResultat.innerText = "Mesurez la distance sélectionnée...";
+                btn.innerText = "🛑 Règle Active";
+                divResultat.innerText = "Sélectionnez vos 2 points sur la carte...";
                 pointsMesure = [];
                 regleGroup.clearLayers();
             } else {
                 btn.style.background = '#0284c7';
-                btn.innerText = "📏 Activer la règle";
-                divResultat.innerText = "";
+                btn.innerText = "📏 Activer";
+                divResultat.innerText = "Double-cliquez pour poser les périmètres";
                 regleGroup.clearLayers();
             }
         }
 
-        // ================= LOGIQUE DE CLIC ET DU CALCUL D'ÉCHELLE CRITIQUÉ =================
+        // INTERACTION CLIC
         map.on('click', function(e) {
             if (!modeRegleActive) return;
 
@@ -146,36 +171,24 @@
             L.circleMarker(e.latlng, { radius: 4, color: '#eab308', fillColor: '#fff', fillOpacity: 1 }).addTo(regleGroup);
 
             if (pointsMesure.length === 2) {
-                // 1. Distance brute lue en pixels
                 const dx = pointsMesure[1].lng - pointsMesure[0].lng;
                 const dy = pointsMesure[1].lat - pointsMesure[0].lat;
                 const distancePixels = Math.sqrt(dx * dx + dy * dy);
-
-                // 2. Récupération de la distance cible choisie par l'opérateur (ex: 400 ou 2000)
                 const distanceCibleMetres = parseFloat(document.getElementById('select-distance').value);
-
-                // 3. Règle de trois pour convertir la mesure en valeur étalon de 2000m
-                // Formule : (Pixels_lus / Distance_lue_en_m) * 2000
                 const etalonCalcule = Math.round((distancePixels / distanceCibleMetres) * 2000);
 
-                // Dessin de la ligne témoin
                 L.polyline(pointsMesure, { color: '#eab308', weight: 3, dashArray: '4, 4' }).addTo(regleGroup);
-
-                // Affichage des informations calculées
-                document.getElementById('resultat-mesure').innerText = `Lu : ${Math.round(distancePixels)}px pour ${distanceCibleMetres}m`;
-                
-                // Injection automatique dans la case de contrôle et mise à jour du moteur
+                document.getElementById('resultat-mesure').innerText = `Échelle étalonnée : ${etalonCalcule} px`;
                 document.getElementById('input-scale').value = etalonCalcule;
                 PIXELS_POUR_2000M = etalonCalcule;
 
-                // Fermeture de la règle
                 modeRegleActive = false;
                 document.getElementById('btn-regle').style.background = '#0284c7';
-                document.getElementById('btn-regle').innerText = "📏 Activer la règle";
+                document.getElementById('btn-regle').innerText = "📏 Activer";
             }
         });
 
-        // ================= DOUBLE-CLIC : POSER LES PERIMETRES =================
+        // TRACÉ SUR DOUBLE CLIC
         map.on('dblclick', function(e) {
             if (!currentPlan || modeRegleActive) return;
 
@@ -204,7 +217,7 @@
             L.circleMarker(pointCentral, { radius: 5, color: '#fff', fillColor: '#000', fillOpacity: 1, weight: 2 }).addTo(layerGroup);
         });
 
-        // ================= RECEPTION PDF =================
+        // RENDU DU DOCUMENT PDF
         document.getElementById('file-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -220,7 +233,6 @@
                         const canvas = document.createElement('canvas');
                         canvas.height = viewport.height;
                         canvas.width = viewport.width;
-                        
                         const context = canvas.getContext('2d');
 
                         page.render({ canvasContext: context, viewport: viewport }).promise.then(function() {
@@ -242,11 +254,11 @@
             layerGroup.clearLayers();
             regleGroup.clearLayers();
             if (currentPlan) { map.removeLayer(currentPlan); currentPlan = null; }
-            document.getElementById('resultat-mesure').innerText = "";
+            document.getElementById('resultat-mesure').innerText = "Double-cliquez pour poser les périmètres";
             pointsMesure = [];
             modeRegleActive = false;
             document.getElementById('btn-regle').style.background = '#0284c7';
-            document.getElementById('btn-regle').innerText = "📏 Activer la règle";
+            document.getElementById('btn-regle').innerText = "📏 Activer";
         }
     </script>
 </body>
