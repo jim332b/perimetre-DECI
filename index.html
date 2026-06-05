@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tableau Tactique - Gironde Cadri400</title>
+    <title>Tableau Tactique & Mesure - Gironde</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
@@ -20,15 +20,21 @@
         }
         #panel-controls h3 { margin: 0 0 10px 0; color: #a855f7; text-transform: uppercase; font-size: 14px; text-align: center;}
         
-        .btn-ui { width: 100%; padding: 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; font-size: 11px; margin-top: 5px; }
+        .btn-ui { width: 100%; padding: 10px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; font-size: 11px; margin-top: 5px; }
         .btn-purple { background: #8b5cf6; color: white; }
+        .btn-blue { background: #0284c7; color: white; }
         .btn-red { background: #c62828; color: white; }
         #file-input { display: none; }
+        
+        /* Zone d'étalonnage */
+        .zone-etalonnage { background: #222; padding: 10px; border-radius: 4px; border: 1px dashed #555; margin-top: 10px; }
+        .input-pixel { width: 70px; background: #333; border: 1px solid #555; color: white; padding: 5px; border-radius: 3px; font-weight: bold; text-align: center; }
         
         .box-legende { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 15px; text-align: center; font-size: 9px; font-weight: bold; }
         .item-legende { padding: 4px 2px; border-radius: 3px; color: black; }
         
-        #instructions { background: #222; padding: 8px; border-radius: 4px; border-left: 3px solid #8b5cf6; margin-bottom: 10px; font-size: 11px; color: #ccc; }
+        #instructions { background: #1a1a1a; padding: 8px; border-radius: 4px; border-left: 3px solid #8b5cf6; margin-bottom: 10px; font-size: 11px; color: #ccc; }
+        #resultat-mesure { font-weight: bold; color: #38bdf8; margin-top: 5px; min-height: 16px; }
     </style>
 </head>
 <body>
@@ -39,14 +45,27 @@
         <h3>PC Opérationnel Gironde</h3>
         
         <div id="instructions">
-            1. Chargez une dalle PDF<br>
-            2. <b>Double-cliquez</b> sur la carte pour positionner/valider les périmètres.
+            <b>Mode Standard :</b> Double-cliquez pour poser les périmètres de sécurité.<br><br>
+            <b>Mode Mesure :</b> Activez la règle ci-dessous pour calculer l'échelle d'une dalle.
         </div>
 
         <button class="btn-ui btn-purple" onclick="document.getElementById('file-input').click()">📁 Ouvrir une dalle PDF</button>
         <input type="file" id="file-input" accept="application/pdf">
         
-        <button class="btn-ui btn-red" onclick="effacerPerimetres()">❌ Effacer les cercles</button>
+        <div class="zone-etalonnage">
+            <button id="btn-regle" class="btn-ui btn-blue" onclick="basculerModeRegle()">📏 Activer la règle de mesure</button>
+            <div id="resultat-mesure"></div>
+            
+            <div style="margin-top:10px; display:flex; justify-content:space-between; align-items:center;">
+                <span>Échelle actuelle :</span>
+                <div>
+                    <input type="number" id="input-scale" class="input-pixel" value="300" onchange="mettreAJourEchelle(this.value)"> px
+                </div>
+            </div>
+            <span style="font-size:10px; color:#aaa;">(Valeur en pixels pour un carré de 2km)</span>
+        </div>
+        
+        <button class="btn-ui btn-red" style="margin-top:10px;" onclick="effacerTout()">❌ Effacer l'écran</button>
 
         <div class="box-legende">
             <div class="item-legende" style="background: #ff5252;">200m</div>
@@ -62,83 +81,93 @@
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
-        // ÉCHELLE REEL DU CADRI400 EN PIXELS (À ajuster selon vos PDF si besoin)
-        // Sur un rendu standard, si un carré de 2km fait environ 300 pixels de large :
-        const PIXELS_POUR_2000M = 500; 
+        // Valeur par défaut de l'échelle (pixels pour 2000m)
+        let PIXELS_POUR_2000M = 300; 
+        let modeRegleActive = false;
+        let pointsMesure = [];
+        let ligneMesure = null;
 
-        // Initialisation de Leaflet en mode "Image Simple" (Simple CRS)
-        // Ce mode désactive le GPS et la boussole terrestre pour traiter le PDF comme un tableau de dessin
         const map = L.map('map', {
             crs: L.CRS.Simple,
             zoomControl: false,
             minZoom: -2,
             maxZoom: 3,
-            doubleClickZoom: false // Désactivé pour nous laisser poser les cercles au double-clic
+            doubleClickZoom: false
         }).setView([0, 0], 0);
 
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
         const layerGroup = L.featureGroup().addTo(map);
+        const regleGroup = L.featureGroup().addTo(map);
         let currentPlan = null;
 
-        // Conversion des mètres réels en "pixels/unités" pour ce format de document
         function metreEnUnites(metres) {
             return (metres * PIXELS_POUR_2000M) / 2000;
         }
 
-        // ================= CHARGEMENT DU PDF SUR DIMENSION STANDARD =================
-        document.getElementById('file-input').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
+        function mettreAJourEchelle(nouvelleValeur) {
+            PIXELS_POUR_2000M = parseFloat(nouvelleValeur);
+        }
 
-            if (currentPlan) { map.removeLayer(currentPlan); layerGroup.clearLayers(); }
+        // ================= GESTION DU MODE RÈGLE =================
+        function basculerModeRegle() {
+            modeRegleActive = !modeRegleActive;
+            const btn = document.getElementById('btn-regle');
+            const divResultat = document.getElementById('resultat-mesure');
+            
+            if (modeRegleActive) {
+                btn.style.background = '#eab308';
+                btn.innerText = "🛑 Règle active (Cliquez 2 points)";
+                divResultat.innerText = "Sélectionnez le début et la fin d'un carré...";
+                pointsMesure = [];
+                if (ligneMesure) { regleGroup.clearLayers(); }
+            } else {
+                btn.style.background = '#0284c7';
+                btn.innerText = "📏 Activer la règle de mesure";
+                divResultat.innerText = "";
+                regleGroup.clearLayers();
+            }
+        }
 
-            const fileReader = new FileReader();
-            fileReader.onload = function() {
-                const typedarray = new Uint8Array(this.result);
-                pdfjsLib.getDocument(typedarray).promise.then(function(pdf) {
-                    pdf.getPage(1).then(function(page) {
-                        // On force une dimension standard de haute qualité (scale: 2.0)
-                        const viewport = page.getViewport({ scale: 2.0 });
-                        const canvas = document.createElement('canvas');
-                        canvas.height = viewport.height;
-                        canvas.width = viewport.width;
-                        
-                        const context = canvas.getContext('2d');
+        // ================= CLIC SUR LA CARTE (DESSIN OU MESURE) =================
+        map.on('click', function(e) {
+            if (!modeRegleActive) return;
 
-                        page.render({ canvasContext: context, viewport: viewport }).promise.then(function() {
-                            const imgUrl = canvas.toDataURL('image/png');
-                            
-                            // Dimensions standard de l'image créée
-                            const h = viewport.height;
-                            const w = viewport.width;
-                            const limitesImage = [[0, 0], [h, w]];
+            pointsMesure.push(e.latlng);
 
-                            // Positionnement du PDF de façon opaque au centre du tableau de bord
-                            currentPlan = L.imageOverlay(imgUrl, limitesImage).addTo(map);
-                            
-                            // Recentrer et caler la vue sur la dalle entière
-                            map.fitBounds(limitesImage);
-                        });
-                    });
-                });
-            };
-            fileReader.readAsArrayBuffer(file);
+            // Dessiner un repère visuel sur le point cliqué
+            L.circleMarker(e.latlng, { radius: 4, color: '#eab308', fillColor: '#fff', fillOpacity: 1 }).addTo(regleGroup);
+
+            if (pointsMesure.length === 2) {
+                // Calcul de la distance pure en pixels (théorème de Pythagore sur coordonnées planes)
+                const dx = pointsMesure[1].lng - pointsMesure[0].lng;
+                const dy = pointsMesure[1].lat - pointsMesure[0].lat;
+                const distancePixels = Math.round(Math.sqrt(dx * dx + dy * dy));
+
+                // Tracer la ligne de mesure entre les deux points
+                L.polyline(pointsMesure, { color: '#eab308', weight: 3, dashArray: '4, 4' }).addTo(regleGroup);
+
+                // Afficher le résultat
+                document.getElementById('resultat-mesure').innerText = `Mesure : ${distancePixels} pixels`;
+                
+                // Proposer automatiquement la valeur dans la case d'étalonnage
+                document.getElementById('input-scale').value = distancePixels;
+                PIXELS_POUR_2000M = distancePixels;
+
+                // Désactiver proprement la règle après la mesure
+                modeRegleActive = false;
+                document.getElementById('btn-regle').style.background = '#0284c7';
+                document.getElementById('btn-regle').innerText = "📏 Activer la règle de mesure";
+            }
         });
 
-        // ================= DOUBLE-CLIC : POSITIONNER ET VALIDER LES RAYONS =================
+        // ================= DOUBLE-CLIC : POSER LES PERIMETRES =================
         map.on('dblclick', function(e) {
-            if (!currentPlan) {
-                alert("Veuillez d'abord charger une dalle PDF.");
-                return;
-            }
+            if (!currentPlan || modeRegleActive) return;
 
-            // On efface les cercles précédents si on change d'avis
             layerGroup.clearLayers();
-
             const pointCentral = e.latlng;
 
-            // Configuration des cercles basés sur notre échelle fixe de pixels
             const configurations = [
                 { rayon: 200, couleur: '#ff5252' },
                 { rayon: 400, couleur: '#ffab40' },
@@ -147,7 +176,6 @@
                 { rayon: 4000, couleur: '#66bb6a' }
             ];
 
-            // Tracé des cercles à taille constante et fixe
             configurations.forEach(config => {
                 L.circle(pointCentral, {
                     radius: metreEnUnites(config.rayon),
@@ -159,12 +187,52 @@
                 }).addTo(layerGroup);
             });
 
-            // Petit marqueur central de validation de l'impact
             L.circleMarker(pointCentral, { radius: 5, color: '#fff', fillColor: '#000', fillOpacity: 1, weight: 2 }).addTo(layerGroup);
         });
 
-        function effacerPerimetres() {
+        // ================= CHARGEMENT DU PDF =================
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            effacerTout();
+
+            const fileReader = new FileReader();
+            fileReader.onload = function() {
+                const typedarray = new Uint8Array(this.result);
+                pdfjsLib.getDocument(typedarray).promise.then(function(pdf) {
+                    pdf.getPage(1).then(function(page) {
+                        const viewport = page.getViewport({ scale: 2.0 });
+                        const canvas = document.createElement('canvas');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+                        
+                        const context = canvas.getContext('2d');
+
+                        page.render({ canvasContext: context, viewport: viewport }).promise.then(function() {
+                            const imgUrl = canvas.toDataURL('image/png');
+                            const h = viewport.height;
+                            const w = viewport.width;
+                            const limitesImage = [[0, 0], [h, w]];
+
+                            currentPlan = L.imageOverlay(imgUrl, limitesImage).addTo(map);
+                            map.fitBounds(limitesImage);
+                        });
+                    });
+                });
+            };
+            fileReader.readAsArrayBuffer(file);
+        });
+
+        function effacerTout() {
             layerGroup.clearLayers();
+            regleGroup.clearLayers();
+            if (currentPlan) { map.removeLayer(currentPlan); currentPlan = null; }
+            document.getElementById('resultat-mesure').innerText = "";
+            pointsMesure = [];
+            modeRegleActive = false;
+            document.getElementById('btn-regle').style.background = '#0284c7';
+            document.getElementById('btn-regle').innerText = "📏 Activer la règle de mesure";
         }
     </script>
 </body>
